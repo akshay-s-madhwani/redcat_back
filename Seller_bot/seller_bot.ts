@@ -273,7 +273,7 @@ const single_upload_confirm = async (socket:any , formatted_number:string , mess
        title,
        price:Number(price),
        originalPrice:Number(originalPrice),
-       currency,
+       currency:'hkd',
        stock:Number(stock),
        description,
        image,

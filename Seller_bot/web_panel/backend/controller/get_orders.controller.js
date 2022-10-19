@@ -12,7 +12,7 @@ module.exports = async (req, res) => {
     console.log(seller_id)
     try{
     	if(!limit) limit = 10;
-    let order = await orderSchema.find({}).populate('user').populate('seller').populate({path:'products.product'});
+    let order = await orderSchema.find({}).populate('ordered_by').populate('seller').populate({path:'products.product'});
     order.map(i=>i.seller?console.log(i._id):null)
     order = order.filter(i=>i.seller?i.seller.seller_id === seller_id:null);
     if(order.length){

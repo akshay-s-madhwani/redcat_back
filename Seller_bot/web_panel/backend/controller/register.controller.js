@@ -3,6 +3,8 @@ let shortid = require('shortid');
 const jwt = require('jsonwebtoken');
 
 let sellerSchema = require('../../../../models/seller_model.js');
+const redis = new (require('ioredis'))();
+
 
 module.exports = async (req , res )=>{
 	// @Method POST
@@ -54,6 +56,7 @@ try{
 			 jwt.sign(jwt_user , process.env.SECRET  , (err, token)=>{
 				if(err) throw err;
 				jwt_user.token = token;
+				redis.publish('registration_channel',JSON.stringify({number:new_user.number}));
 				return res.status(200).json({
 					shop_name:new_user.shop_name,
 					email:new_user.email,

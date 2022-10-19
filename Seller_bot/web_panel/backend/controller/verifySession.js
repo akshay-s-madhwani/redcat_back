@@ -8,8 +8,8 @@ module.exports = async (req , res )=>{
                 console.log(token.replace('Bearer ',''))
             let isMatch = jwt.verify(token.replace('Bearer ',''),config['SECRET']||'newSecret');
             if(isMatch){
-                let {email , number , name , seller_id , currency} = isMatch;
-                return res.json({success:true , msg:"valid", email , number , seller_id , name , currency})
+                //Return shop_name , email , number , currency and seller_id
+                return res.json({success:true , msg:"valid",...isMatch})
             }
             }catch(e){
                 console.log(e)
