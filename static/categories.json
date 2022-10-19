@@ -1,0 +1,23 @@
+[
+	{
+		"name":"accessories",
+		"image":"./static/category_images/accessories.jpeg"
+	},
+	{
+		"name":"jewelery",
+		"image":"./static/category_images/jewellery.jpeg"
+	},
+	{
+		"name":"electronics",
+		"image":"./static/category_images/electronics.jpeg"
+	},
+	{
+		"name":"men_clothing",
+		"image":"./static/category_images/male_clothing.jpg"
+	},
+	{
+		"name":"women_clothing",
+		"image":"./static/category_images/female_clothing.jpg"
+	}
+
+]

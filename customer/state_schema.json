@@ -1,0 +1,14 @@
+{
+	"order":{
+	"product_id":1,
+	"stage":"quantity"|"payment"||"coupon"
+	"quantity":3,
+	"coupon":"coupon_code",
+	"payment":"cod"||"mastercard"||"paypal",
+	},
+	"pagination":{
+	"category":"mens_clothing",
+	"page":1,
+	"offset":5
+	}
+}

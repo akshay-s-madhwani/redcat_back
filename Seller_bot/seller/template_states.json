@@ -1,0 +1,43 @@
+{
+"active_state":"general",
+"authorized":false,
+  "states": {
+  	"signup":{
+  	"waiting_for":"shopname",
+  	"steps":["shopname","email", "password","address","confirm" ],
+  	"step":0,
+  	"type":"recursive",
+  	"data":{}
+},
+	"signin":{
+  	"waiting_for":"password",
+  	"steps":["password"],
+  	"type":"straight"
+},
+	"single_upload":{
+  	"waiting_for":"data",
+  	"steps":["data" , "description" , "properties" , "images" , "confirm"],
+  	"step":0,
+  	"type":"recursive"
+},
+"multi_upload":{
+  	"waiting_for":"csv",
+  	"steps":["csv" , "images" , "confirm"],
+  	"type":"recursive"
+},
+	"edit_product":{
+  	"waiting_for":"change",
+  	"steps":["change" , "confirm"],
+  	"type":"recursive"
+},
+	"update_order_status":{
+  	"waiting_for":"update",
+  	"steps":["update","confirm"],
+  	"type":"recursive"
+}
+  },
+  "pagination": {
+    "page": 1,
+    "offset": 5
+  }
+}
