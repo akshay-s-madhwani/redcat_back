@@ -15,6 +15,7 @@ module.exports = async (req, res) => {
     try{
         
     let seller = await sellerSchema.findOne({seller_id:id}).populate('products_uploaded')
+    
         return res.json({ seller });
     }
         catch(e) {

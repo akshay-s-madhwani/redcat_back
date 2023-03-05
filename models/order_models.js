@@ -21,13 +21,18 @@ const orderSchema = Schema({
         ref:'seller'
     },
     multi_seller:[{
-        product:{type:mongoose.Schema.Types.ObjectId,
-            ref:'products'},
+        product:{
+            type:mongoose.Schema.Types.ObjectId,
+            ref:'products'
+        },
             soldBy:{
                 type:mongoose.Schema.Types.ObjectId,
-                ref:'seller'
+                ref:'sellers'
             },
-            quantity:{type:Number}
+            quantity:{type:Number},
+            amount : {
+                type:Number
+            }
     }],
     ordered_by:{
         type:mongoose.Schema.Types.ObjectId,

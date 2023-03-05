@@ -1,5 +1,6 @@
 import { Boom } from '@hapi/boom';
 import { config } from 'dotenv';
+import { spawn } from 'child_process';
 import makeWASocket, { AnyMessageContent, delay, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore, MessageRetryMap, useMultiFileAuthState , downloadMediaMessage , proto } from '../../src';
 import MAIN_LOGGER from '../../src/Utils/logger';
 import { show_menu } from './utils/menu';
@@ -11,16 +12,29 @@ import mongoose from 'mongoose';
 import fs from 'fs';
 import path from 'path';
 
+require('dotenv').config({path:'../.env'})
 const os = require('os');
 const shortid = require('shortid');
 const redis = new (require('ioredis'))();
+const redis_pub = new (require('ioredis'))();
+const redis_setters = new (require('ioredis'))();
+
 const productSchema = require('../models/product_model');
 const sellerSchema = require('../models/seller_model');
+const orderSchema = require('../models/order_models');
+const emoji = JSON.parse(fs.readFileSync('../emoji.json','utf8'))
+const btn_text = JSON.parse(fs.readFileSync('../buttons.json','utf8'))
 
 const logger = MAIN_LOGGER.child({});
 logger.level = 'silent';
 
 config();
+
+redis.subscribe('payment_status_channel');
+  redis.subscribe('check_number');
+  redis.subscribe('registration_channel')
+  redis.subscribe('notifications');
+  redis.subscribe('test_message');redis.subscribe('test_message_')
 
 var session ='seller_'+module.filename.slice(__filename.lastIndexOf(path.sep)+1, module.filename.length -3);
 
@@ -70,21 +84,7 @@ var session ='seller_'+module.filename.slice(__filename.lastIndexOf(path.sep)+1,
                      // ---------------------------------------------------
 // };
 
-
-const upload_products = async(socket:any , formatted_number:string)=>{
-
-      await socket.sendMessage(formatted_number , {
-        text:"How would you like to Proceed?\n\n*Multiple Upload*-\n(Upload Multiple Products through a CSV file)\n\n*Single Upload*-\n(Upload a single product through Explicitly Entering Details in chat)",
-        buttons:[
-        {buttonId:'multi_upload' , buttonText:{displayText:"Multiple Upload"} ,type:1},
-        {buttonId:'single_upload' , buttonText:{displayText:"Single Upload"} ,type:1}
-        ],
-        headerType:4
-      })
-
-}
-
-
+//======Initiates Upload process ===========================================
 const single_upload_product = async(socket:any,formatted_number:string , next:boolean=true)=>{
   let state = await read_states(formatted_number);
   let row_suffix = next?'category_single':'category_edit';
@@ -107,9 +107,7 @@ const single_upload_product = async(socket:any,formatted_number:string , next:bo
       state.active_state = 'single_upload';
       state.states.single_upload.waiting_for = 'category'
       state.states.single_upload.data = {}
-      await write_states(formatted_number , state);
-
-  
+      write_states(formatted_number , state);
 }
 
 const single_upload_category = async(socket:any , formatted_number:string , message:string , next:boolean=true)=>{
@@ -132,7 +130,6 @@ const single_upload_category = async(socket:any , formatted_number:string , mess
   headerType:4
   })
 }else{
-
 }
 }
 
@@ -199,29 +196,23 @@ const single_upload_description = async(socket:any , formatted_number:string , m
 }
 
 const single_upload_property = async (socket:any , formatted_number:string , message:string)=>{
-
       let state = await read_states(formatted_number);
       if(message !== 'skip'){
       state.states.single_upload.property = message;
        await write_states(formatted_number , state);
       await socket.sendMessage(formatted_number , {text:"Please Enter Options for the selected property\n( _These can multiple Type options, and should be seperated by \" # \"_ )\n*Example*:\n(if chosen \"color\" )\nType => Red # Blue # Green \n\n Or \n\n Type => Red (if only Red color is available) "})
-
     }
     else{
       await single_upload_image(socket , formatted_number , '' , 'skip');
+    }    
     }
-    
-    }
-
-
-
 
 const single_upload_image = async(socket:any , formatted_number:string , message:string , key:string='')=>{
         let state = await read_states(formatted_number)
         if(key !== 'skip'){
           let data_ = message.split('#');
           state.states.single_upload.data[state.states.single_upload.property] = data_;
-          await write_states(formatted_number , state);
+          write_states(formatted_number , state);
           return await socket.sendMessage(formatted_number , {
             text:"Option Added\nAdd more properties if you want\nOr Select \"Proceed\" to proceed to next step",
             buttons:[
@@ -239,12 +230,22 @@ const single_upload_confirm = async (socket:any , formatted_number:string , mess
     let message_ = messages.messages[0].message;
     let url = message_.imageMessage.url.split('/');
     let name = url[url.length-1];
-    let src_name = `./static/images/${formatted_number.replace(Prefix , '')}/${name}.${message_.imageMessage.mimetype.split('/')[1]}`
+    let { mimetype } = message_.imageMessage;
+    let src_name = `./static/images/${formatted_number.replace(Prefix , '')}/${name}.${mimetype.split('/')[1]}`
     state.states.single_upload.data['image'] = src_name;
     state.states.single_upload.waiting_for = 'confirm';
     let file_ = await downloadMediaMessage( messages.messages[0] , 'buffer' , {} );
     fs.existsSync(`./static/images/${formatted_number.replace(Prefix , '')}`)?null:fs.mkdirSync(`./static/images/${formatted_number.replace(Prefix , '')}`);
-            await fs.writeFile(src_name,file_ as Buffer, ()=>{});
+            fs.writeFileSync(src_name,file_ as Buffer);
+             let image_data_from_file = fs.readFileSync(src_name,'base64');
+             
+        if(src_name.endsWith('.jpg') || src_name.endsWith('.jpeg') || src_name.endsWith('.pjpeg') || src_name.endsWith('.jfif')){
+            image_data_from_file = `data:image/jpeg;base64,${image_data_from_file}`;
+        }
+        if(src_name.endsWith('.png')){
+            image_data_from_file = `data:image/png;base64,${image_data_from_file}`;
+        }
+        
      await console.log('Image '+src_name+' Saved');
      let public_id = shortid().replace(/_/g,'')
      state.states.single_upload.data['public_id'] = public_id;
@@ -277,6 +278,7 @@ const single_upload_confirm = async (socket:any , formatted_number:string , mess
        stock:Number(stock),
        description,
        image,
+       imageData : image_data_from_file,
        status:'private',
         properties:[{...properties_}],
         seller_details:_id,
@@ -301,7 +303,6 @@ const single_upload_confirm = async (socket:any , formatted_number:string , mess
        headerType:4
      }
 await socket.sendMessage(formatted_number , finalMessage);
-
 };
 
 const save_single_product = async(socket:any , formatted_number:string)=>{
@@ -318,6 +319,8 @@ const save_single_product = async(socket:any , formatted_number:string)=>{
  await show_menu(socket , formatted_number);
 }
 
+
+//=============Initiates Edit of product ==========================
 const edit_product_select_option = async (socket:any , formatted_number:string , product_id:string) =>{
     let state = read_states(formatted_number);
     let product_data = await productSchema.findOne({public_id:product_id});
@@ -457,6 +460,8 @@ await socket.sendMessage(formatted_number , finalMessage);
   }
 }
 
+
+//=================Shows All Products====================
 const all_products = async(socket:any , formatted_number:string)=>{
     let {_id , currency } = await sellerSchema.findOne({formatted_number});
     let seller_data = await sellerSchema.findOne({formatted_number}).populate('products_uploaded');
@@ -625,7 +630,7 @@ setInterval(() => {
   store?.writeToFile('./baileys_store_multi.json')
 }, 10_000)
 
-const startSock = async (): Promise<{ sendSimpleMessage: (content: string, number: string)=> Promise<proto.WebMessageInfo>}> => {
+const startSock = async (): Promise<{ sendSimpleMessage: (content: any, number: any, mType?:any)=> Promise<proto.WebMessageInfo>}> => {
 
   const normalPrefix = Prefix;
 
@@ -641,16 +646,231 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
   });
   store?.bind(socket.ev);
 
-  socket.ev.on('connection.update', async (e) => {
-    console.log(e)
+  socket.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect } = update
+        if(connection === 'close') {
+          let ps = spawn('python3' , ['../email_utility.py', "Seller bot stopped",`Bot has stopped due to Connection close`,'logicredefined@gmail.com'])
+            const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut
+            console.log('connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect)
+
+            await redis_setters.set(session , 'false')
+
+            
+            // reconnect if not logged out
+//            if(shouldReconnect) {
+//                startSock()
+//            }
+        } else if(connection === 'open') {
+
+        	await redis_setters.set(session , 'true')
+
+            console.log('opened connection')
+            
+            
+redis.on('message',async (channel:string , message:any)=>{
+  if(!fs.existsSync('./redis_messages.log')){fs.writeFileSync('./redis_messages.log',`${'='.repeat(20)}_Redis_Logs_${'='.repeat(20)}\n`)}
+  fs.appendFileSync('./redis_messages.log',
+  `\n${new Date().toLocaleString()}  ${channel}\n${'-'.repeat(50)}\n${message}\n${'_'.repeat(50)}\n`
+  );
+  if(channel === 'payment_status_channel'){
+    
+    let {info , _id , address , order_details , number , has_extra_charge , hasDelivery , collection_point } = JSON.parse(message);
+    console.dir(message);
+    
+    let {invoice_number , products , seller ,gross_price , net_price , vat , extra_charge , discount , multi_seller } = order_details._doc;
+
+    let user_address = JSON.parse(address);
+    let location_data;
+    if(user_address.hasLocation){
+    let {house , longitude , latitude} = user_address;
+    location_data = {
+      location:{
+      degreesLongitude : Number(longitude),
+      degreesLatitude: Number(latitude) 
+          },
+          headerType:1
+          
+        }
+      }
+
+    if(!multi_seller.length){
+
+    let product_message = '';
+    
+    let seller_number = seller.formatted_number;
+
+    for(let i of products){
+        let {title} = await productSchema.findOne({_id:i.product});
+        let properties='';
+        for(let p of Object.entries(i.properties[0])){
+          console.log(p)
+          properties+=`*${p[0]}* : ${p[1]}\n`
+        }
+        product_message+=`\n*${title}*\n${properties}*Quantity*:${i.quantity}\n`
+    }
+    console.log(seller_number);
+    
+    // let product_message = `${product_details.map(i=>[`*${i.product}*`,`*Quantity: ${i.quantity}*`].join('\n')).join('\n\n')}`;
+    console.log('product message ',product_message);
+    if(user_address.hasLocation){
+    await socket.sendMessage(seller_number , location_data)
+    }
+    console.log(`*Received Order*:\n*Invoice No.*: ${invoice_number}\n${String(product_message)}\n*Gross Price:*${gross_price}\n*VAT:* ${vat}%\n*Extra Charges* ${extra_charge||0}\n*Discount:* ${discount}%\n\n*Net Price* ${net_price || gross_price}\n`)
+    await socket.sendMessage(seller_number , {
+text:`*Received Order*:
+*Invoice No.*: ${invoice_number}
+${product_message}
+*Price*: HKD ${has_extra_charge ? Number(gross_price) - Number(process.env.EXTRA_CHARGE): gross_price  }
+*VAT:* ${vat}%
+*Extra Charges*: ${has_extra_charge?process.env.EXTRA_CHARGE:0}
+*Gross Price*: ${gross_price}
+*Discount*: ${discount}%\n
+*Net Price*: ${net_price || gross_price}
+`});
+console.log(hasDelivery)
+console.log(typeof collection_point)
+if(hasDelivery != "false" ){
+    await socket.sendMessage(seller_number , {text:`Address To be Delivered at:\n${user_address.hasLocation?`Location provided above\n@House Number=>${user_address.house||user_address.text}`:user_address.text} \n\nIf there is any discrepancy found in Address, Please contact customer @: https://wa.me/${number}`});
+    }
+ if(hasDelivery == "false"  && collection_point.length){
+let collection = JSON.parse(collection_point)
+
+await socket.sendMessage(seller_number , {text:`Product will be Collected from shop: ${collection[0].name}\nAt ${JSON.stringify(collection[0].address).replaceAll('{', '').replaceAll('}', '').replaceAll(',', '\n').replaceAll('\\','').replaceAll('"','')}`})
+}    
+    
+  await socket.sendMessage(seller_number , {text:`Go to "Current Orders" As soon as Products are dispatched.\nNet Price of product will be transferred to your A/c\nOn Getting Confirmation of delivery\nOR\n7 Days from Delivery status Getting Updated to "En-Route"` , 
+  buttons:[
+    {buttonId:`current_orders`, buttonText: {displayText: `Current Orders`}, type: 1 },
+  ]});
+    
+
+  }
+// If Multiple Sellers are involved
+else{
+  
+  for(let i of multi_seller){
+    let seller_data = await sellerSchema.findOne({_id:i.soldBy},{number:1,formatted_number:1});
+    console.log(seller_data)
+    let product_message = '';
+    let properties='';
+    let quantity = 1;
+    let seller_number = seller_data.formatted_number;
+
+    let {title , price } = await productSchema.findOne({_id:i.product});
+      if(typeof i.properties === 'object' && Object.entries(i.properties).length){
+      for(let p of Object.entries(i.properties)){
+        console.log(p)
+        properties+=`*${p[0]}* : ${p[1]}\n`
+      }}
+      console.log('properties ',i.properties)
+      product_message+=`\n*${title}*\n${properties}*Quantity*:${i.quantity}\n`
+      quantity = i.quantity;
+      
+  // let product_message = `${product_details.map(i=>[`*${i.product}*`,`*Quantity: ${i.quantity}*`].join('\n')).join('\n\n')}`;
+  console.log('product message ',product_message);
+  if(user_address.hasLocation){
+  await socket.sendMessage(seller_number , location_data)
+  }
+  console.log(`*Received Order*:\n*Invoice No.*: ${invoice_number}\n${String(product_message)}\n*Gross Price:*${gross_price}\n*VAT:* ${vat}%\n*Extra Charges* ${extra_charge||0}\n*Discount:* ${discount}%\n\n*Net Price* ${net_price || gross_price}\n`)
+  await socket.sendMessage(seller_number , {
+text:`*Received Order*:
+*Invoice No.*: ${invoice_number}
+${product_message}
+*Price*: HK$${i.amount }
+*VAT:* ${vat}%
+*Extra Charges*: ${has_extra_charge?process.env.EXTRA_CHARGE:0}
+*Gross Price*: ${i.amount}
+*Discount*: ${discount}%\n
+*Net Price*: ${i.amount}
+`});
+
+
+  await socket.sendMessage(seller_number , {text:`Address To be Delivered at:\n${user_address.hasLocation?`Location provided above\n@House Number=>${user_address.house||user_address.text}`:user_address.text} \n\nIf there is any discrepancy found in Address, Please contact customer @: https://wa.me/${number}`});
+
+  await socket.sendMessage(seller_number , {text:`Go to "Current Orders" As soon as Products are dispatched.\nNet Price of product will be transferred to your A/c\nOn Getting Confirmation of delivery\nOR\n7 Days from Delivery status Getting Updated to "En-Route"` , 
+buttons:[
+  {buttonId:`current_orders`, buttonText: {displayText: `Current Orders`}, type: 1 },
+]});
+}
+}
+}
+if(channel === 'notifications'){
+let parsed_message = JSON.parse(message);
+  let { invoice , target } = parsed_message;
+  console.log('Notification',invoice , target)
+  let order_data = await orderSchema.findOne({invoice_number:invoice})
+  .populate('ordered_by')
+  .populate('seller')
+  .populate({path:'products.product'});
+  
+  let { ordered_by , seller , products , delivery_status , created_on  , multi_seller} = order_data;
+  
+  if(target === 'seller'){
+    if(delivery_status.toLowerCase() !== 'en-route' && delivery_status.toLowerCase() !== 'delivered'){
+    console.log(order_data.seller)	
+    let buttons = [
+      {buttonId:`notify_seller_yes_${order_data._id}` , buttonText: {displayText:"Yes"}, type:1},
+      {buttonId:`notify_seller_no_${order_data._id}` , buttonText: {displayText:"No"}, type:2},
+      ]
+  
+    if(!multi_seller.length){
+    
+    await socket.sendMessage(seller.formatted_number , {
+      text:`Hello\nWe got to know that you haven't Updated status of\nOrder No. *${invoice}*\nItems: ${products.map(i=>`*${i.product.title}*`)}\n Ordered By:${ordered_by.pushname}\n\n_Have you Dispatched / Delivered this order yet_?`,
+      footer:"It is best to respond to this question as this will help us keep track of your delivery status",
+      buttons
+      
+      });
+    }
+  }
+  }
+}
+  if(channel === 'check_number'){
+    let result = await socket.sendMessage(message , {text:'verify_number'})
+    console.log(result);
+    
+    await redis_pub.publish('checked_number',result)
+    }
+
+    if(channel === 'registration_channel'){
+      let { otp , number } = JSON.parse(message);
+      await socket.sendMessage(`${number}@s.whatsapp.net` , {text:`Hello and Welcome to Redcat Merchant Management\nPlease enter this OTP into verification page \n\n*${otp}*`});
+      }
+    if(channel === 'test_message'){
+    console.log(message)
+    await socket.sendMessage('919654558103'+Prefix ,  {
+      text: 'text https://www.youtube.com/watch?v=7vQOoLtwpGc',
+          footer: `bot.name`,
+          templateButtons: [
+          {index:1, quickReplyButton: {displayText: `Visit it out https://www.youtube.com/watch?v=7vQOoLtwpGc`}},
+            {index:2, quickReplyButton: {displayText: 'About Us'} }
+            ]
+                    
+           })
+
+    }
+    if(channel === 'test_message_'){
+    console.log(message)
+    await socket.sendMessage('919654558103'+Prefix ,  
+      {text:"Sending Location"}
+)
+    await socket.sendMessage('919654558103'+Prefix ,  
+      { location: { degreesLatitude: 24.121231, degreesLongitude: 55.1121221 } }
+)
+    }
+    })
+            
+        }
     await saveCreds();
+
 
   });
 
   socket.ev.on('messages.upsert', async (message) => {
       await write_logs(JSON.stringify(message))
     if(message.type === 'notify'){
-
+      
+      //Stops from going further if received Message is not a chat message or a message to itself
       if(message.messages[0].status === 2) return;
 
       if(message.messages[0].key.remoteJid?.match(/@broadcast/gi)?.length) return;
@@ -658,7 +878,7 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
       if(message.messages[0].key.remoteJid?.match(/@g.us/gi)?.length) return;
 
       if(message.messages[0].key.fromMe){return }
-
+//================================================================================================
       let sender = message.messages[0];
 
       let formatted_number = sender.key!.remoteJid!;
@@ -667,8 +887,8 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
       let user = await sellerSchema.findOne({formatted_number});
 
       if(!fs.existsSync(`./seller/${formatted_number.replace(Prefix,'')}_states.json`)){
-        let template = await fs.readFileSync('./seller/template_states.json','utf8')
-        await fs.writeFileSync(`./seller/${formatted_number.replace(Prefix,'')}_states.json` , template);
+        let template = fs.readFileSync('./seller/template_states.json','utf8')
+        fs.writeFileSync(`./seller/${formatted_number.replace(Prefix,'')}_states.json` , template);
       }
 
       if(!user){
@@ -682,11 +902,11 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
             user = await user.save();
             await console.log(user);
             let message = await {
-              text:'Greetings!! 😊\nWelcome to WhatStores Merchant Panel\nA Plethora of Opportunities and Sales Revenue Awaits you.\n If You\'re a Merchant Looking for Treading new Waters to Trade.\nHurry Up and Join Our Stores 😉',
+              text:`Greetings!! ${emoji.girl}\nWelcome to WhatStores Merchant Panel\nA Plethora of Opportunities and Sales Revenue Awaits you.\n If You\'re a Merchant Looking for Treading new Waters to Trade.\nHurry Up and Join Our Stores ${emoji.divider.repeat(9)}`,
               buttons:[
               {buttonId:`signup`, buttonText: {displayText: `Sign Up`}, type: 1 },
               {buttonId:`aboutus`, buttonText: {displayText: `About Us`}, type: 1 },
-              {buttonId:`benefits`, buttonText: {displayText: `Benefits`}, type: 1 },
+              // {buttonId:`benefits`, buttonText: {displayText: `Benefits`}, type: 1 },
               ],
               headerType:4
             }
@@ -720,18 +940,33 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
           let states = await read_states(formatted_number);
           if(Object.keys(sender!.message!).includes('conversation')){
           content = await String(sender!.message!.conversation!);
-          console.log(content)
-          if(content.toLowerCase().trim() === 'menu'){
+          console.log(content.toLowerCase().trim())
+          if(['menu','hi','hello','yo','sup','.','hey'].includes(content.toLowerCase().trim())){
+            if(!states.authorized){
+              let signin_message = await {
+                text:'Already a User?',
+                buttons:[
+                {buttonId:`signin`, buttonText: {displayText: `Sign In`}, type: 1 }
+                ],
+                headerType:4
+              }
+              return await socket.sendMessage(formatted_number  , signin_message)
+            }
             await console.log(formatted_number)
             if(states.active_state !== 'general'){
               await socket.sendMessage(formatted_number , {text:"Current process Exited, Coming Back to Main menu"})
             }
             await show_menu(socket, formatted_number);
         }
+        
+        if(content.toLowerCase().trim() === 'logout'){
+          return logout(socket , formatted_number);
+         }
 
          if(states.active_state === 'signin'){
            return check_pass(socket , formatted_number , content)
          }
+         
          if(states.active_state === 'single_upload'){
            switch(states.states.single_upload.waiting_for){
                case 'data':
@@ -809,6 +1044,22 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
             await on_confirmation_of_order(socket , formatted_number , content!.selectedButtonId!);
           }
 
+		if( content!.selectedButtonId!.includes('notify_seller')){
+			let ids = content!.selectedButtonId!.split('_');
+			let [answer , order_id] = ids.slice(2,);
+			if(answer === 'yes'){
+				await socket.sendMessage(formatted_number , {
+					text:"Then you must update the order status, thanks",
+					buttons:[{buttonId:`order_update_${order_id}_0` , buttonText:{displayText:"Update Status"} , type:1}]
+					});
+				
+			}
+            	else{
+            		await socket.sendMessage(formatted_number , {
+            		text:"Alright Then, make sure that you update the order status when you have dispatched your product, thanks" ,
+            		buttons:[{buttonId:`order_update_${order_id}_0` , buttonText:{displayText:"Update Status"} , type:1}]});
+            	}
+          }
           console.log(content.selectedButtonId)
           switch(content.selectedButtonId!){
             case 'menu':
@@ -930,6 +1181,7 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
 }
     
 }
+
   }
   });
 
@@ -947,7 +1199,7 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
       }
   
       if(connection === 'close') {
-
+  
         const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
         
         if(shouldReconnect) {
@@ -965,19 +1217,29 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
   
         resolve({
         
-          async sendSimpleMessage( number: string,content: string): Promise<proto.WebMessageInfo> {
+          async sendSimpleMessage( number: any, content: any , mType?:any): Promise<proto.WebMessageInfo | any > {
 
 
-            // console.log(await socket.sendMessage(`${number}${normalPrefix}`, { text: content }));
-
-            const sendMessage = await socket.sendMessage(`${number}${normalPrefix}`, { text: content });
+            // console.log(await socket.sendMessage(`${number}${normalPrefix}`, content));
+		if(content === 'verify_number'){
+			let [result] =  await socket.onWhatsApp(`${number}${normalPrefix}`);
+			return result?result.exists:false;
+		}
+		if(mType){
+		  const sendMessage = await socket.sendMessage(`${number}${normalPrefix}`, content ,mType);
+		  if(typeof sendMessage === 'undefined') throw { message: 'Not was possible send this message' }
+        
+            return sendMessage;
+		}else{
+            const sendMessage = await socket.sendMessage(`${number}${normalPrefix}`, content );
         
             if(typeof sendMessage === 'undefined') throw { message: 'Not was possible send this message' }
         
             return sendMessage;
+            }
         
           },
-        
+
         })
   
       }
@@ -991,105 +1253,25 @@ const startSock = async (): Promise<{ sendSimpleMessage: (content: string, numbe
 (async () => {
 
   const client = await startSock();
-  redis.subscribe('payment_status_channel');
-  redis.on('message',async (channel:string , message:any)=>{
-    if(channel === 'payment_status_channel'){
-      console.log(message)
-      let {info , _id , address , order_details} = JSON.parse(message);
-      
-      let {invoice_number , products , seller ,gross_price , net_price , vat , extra_charge , discount } = order_details._doc;
-      let seller_number = seller.number;
-      let product_message = '';
-      let properties='';
-      for(let i of products){
-          let {title} = await productSchema.findOne({_id:i.product});
-          
-          for(let p of Object.entries(i.properties[0])){
-            console.log(p)
-            properties+=`*${p[0]}* : ${p[1]}\n`
-          }
-          product_message+=`\n=>*${title}*\n\n${properties}\n*Quantity*:${i.quantity}\n`
-      }
-      
-      
-      let {house_number , street , building , city , text} = JSON.parse(address);
-      // let product_message = `${product_details.map(i=>[`*${i.product}*`,`*Quantity: ${i.quantity}*`].join('\n')).join('\n\n')}`;
-      console.log('product message ',product_message);
-      await client.sendSimpleMessage(seller_number , `*Received Order*:\n*Invoice No.*: ${invoice_number}\n${product_message}\n*Gross Price:*${gross_price}\n*VAT:* ${vat}%\n*Extra Charges* ${extra_charge||0}\n*Discount:* ${discount}%\n\n*Net Price* ${net_price || gross_price}\n`);
-      await client.sendSimpleMessage(seller_number , `Address TO be Delivered at:\nHouse No.: ${house_number}\nBuilding: ${building}\nStreet Name: ${street}\nCity: ${city}\n\nIF there is any discrepancy found in Address, Refer to this provided Text: ${text}`);
-      await client.sendSimpleMessage(seller_number , `Go to "Active Orders" As soon as Products are dispatched to be Shipped.\nNet Price of product will be transferred to your A/c\nOn Getting Confirmation of delivery\nOR\n7 Days from Delivery status Getting Updated to "En-Route"`);
-    }
-  })
+  
+  
 
-//   const MessageSended = await client.sendSimpleMessage( 'Sent from Baileys' , '919654558103');
-// console.log(JSON.stringify(MessageSended, undefined, 2));
- 
 
 })()
 
-
-//       const templateButtons = [
-//     {index: 1, urlButton: {displayText: '⭐ Star Baileys on GitHub!', url: 'https://github.com/adiwajshing/Baileys'}},
-//     {index: 2, callButton: {displayText: 'Call me!', phoneNumber: '+1 (234) 5678-901'}},
-//     {index: 3, quickReplyButton: {displayText: 'This is a reply, just like normal buttons!', id: 'id-like-buttons-message'}},
-// ]
-    
-//       const templateMessage = {
-//         text:'Hello',
-//           footer: 'This is Footer',
-//           templateButtons: templateButtons
-//       }
-
-      //List message -Sections
-//       const sections = [
-//     {
-//   title: "Section 1",
-//   rows: [
-//       {title: "Option 1", rowId: "option1"},
-//       {title: "Option 2", rowId: "option2", description: "This is a description"}
-//   ]
-//     },
-//    {
-//   title: "Section 2",
-//   rows: [
-//       {title: "Option 3", rowId: "option3"},
-//       {title: "Option 4", rowId: "option4", description: "This is a description V2"}
-//   ]
-//     },
-// ]
-
-
-// const listMessage = {
-  // text: "This is a list",
-  // footer: "nice footer, link: https://google.com",
-  // title: "Amazing boldfaced list title",
-  // buttonText: "Required, text on the button to view the list",
-  // sections
-// }
-//         const sections = [
-//     {
-//   title: "Section 1",
-//   rows: [
-//       {title: "Option 1", rowId: "option1"},
-//       {title: "Option 2", rowId: "option2", description: "This is a description"},
-//       {title: "Option 6", rowId: "option3", description: "This is also a  description"}
-//   ]
-//     },
-//    {
-//   title: "Section 2",
-//   rows: [
-//       {title: "Option 3", rowId: "option3"},
-//       {title: "Option 4", rowId: "option4", description: "This is a description V2"}
-//   ]
-//     },
-// ]
-
-
-// const listMessage = {
-//   text: "This is a list",
-//   footer: "nice footer, link: https://google.com",
-//   title: "Amazing boldfaced list title",
-//   buttonText: "Required, text on the button to view the list",
-//   sections
-// }
-//       // await socket.sendMessage(message.messages[0].key.remoteJid! , listMessage)
+process.on('exit',(e)=>{
+  console.log('Exit Message: ',e);
+  let ps = spawn('python3' , ['email_utility.py','Seller Bot Stopped',`Redcat bot has Exited due to these reasons \n${e}`,'logicredefined@gmail.com']);
+})
+process.on('unhandledRejection',(e)=>{
+  console.log('Unhandled Rejection Message: ',e);
+  let ps = spawn('python3' , ['email_utility.py','Seller Bot Stopped',`Redcat bot has stopped due to these Unhandled rejections \n${e}`,'logicredefined@gmail.com']);
+})
+process.on('uncaughtException',(e)=>{
+  console.log('Exception Message: ',e);
+  let ps = spawn('python3' , ['email_utility.py','Seller Bot Stopped',`Redcat bot has stopped due to these Uncaught Exceptions \n${e}`,'logicredefined@gmail.com']);
+})
+process.on('disconnect',(e)=>{
+  console.log('Disconnect Message: ',e);
+  let ps = spawn('python3' , ['email_utility.py','Seller Bot Stopped',`Redcat bot has Disconnected due to these reasons \n${e}`,'logicredefined@gmail.com']);
+})

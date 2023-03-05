@@ -22,21 +22,33 @@ const userSchema = Schema({
         type:String,
         required:false
     },
-    cart:[
-    {
+    cart:[{
+        product:{
             type:mongoose.Schema.Types.ObjectId,
             ref:'products'
-        
+        },
+        properties:[],
+        quantity:{type:Number},
         }],
     score:{
         type:Number
     },
+    reviews:[
+    {type:String}
+    ],
+    isVerified:{type:Boolean},
+    hasAddress:{type:Boolean},
+    hasLocation:{type:Boolean},
     address:{
         text:{type:String},
         house:{type:String},
         street:{type:String},
         building:{type:String},
-        city:{type:String}
+        city:{type:String},
+    },
+    location:{
+        longitude:{type:String},
+        latitude:{type:String},
     },
     date: {
         type: Date,

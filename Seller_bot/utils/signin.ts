@@ -1,7 +1,7 @@
 const { read_states , write_states , wait } = require('./utility_methods');
 const { show_menu } = require('./menu');
 const sellerSchema = require('../../models/seller_model');
-
+const bcrypt = require('bcryptjs')
 
 export const signin = async (socket:any , sender:string)=>{
   const states = await read_states(sender);
@@ -24,8 +24,8 @@ export const check_pass = async (socket:any , formatted_number:string , message:
     if(!checker){
       return await socket.sendMessage(formatted_number , {text:`No Account found with email ${creds[0]}`})
     }
-
-    if(checker.password !== creds[1]){
+    let isMatch = await bcrypt.compare(creds[1] , checker.password)
+    if(!isMatch){
       return await socket.sendMessage(formatted_number , {text:`Password is Incorrect ${creds[1]}`})
     }
     state.active_state = 'general';
@@ -35,5 +35,6 @@ export const check_pass = async (socket:any , formatted_number:string , message:
     await wait(2);
     await show_menu(socket,formatted_number);
     }
+    
  }
 

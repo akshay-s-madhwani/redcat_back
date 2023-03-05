@@ -1,0 +1,2 @@
+"use strict";(self.webpackChunkwhatstore_merchant_panel=self.webpackChunkwhatstore_merchant_panel||[]).push([[634],{6558:function(e,n,t){t.r(n),t.d(n,{Head:function(){return r}});var a=t(7294),u=(t(8678),t(1226),t(8161),t(1597));n.default=function(){return"undefined"!=typeof window?(0,u.navigate)("/signup"):null};var r=function(){return a.createElement("title",null,"Home Page")}}}]);
+//# sourceMappingURL=component---src-pages-index-js-ac12cc67fbc58016671c.js.map

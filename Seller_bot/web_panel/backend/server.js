@@ -1,6 +1,7 @@
 const mongoose = require('mongoose')
 const axios = require('axios');
-const express = require('express')
+const express = require('express');
+const https = require('https');
 const ejs_layout = require('express-ejs-layouts');
 const helmet = require('helmet');
 
@@ -29,6 +30,11 @@ app.use(morgan('combined'))
 app.use(bodyParser.urlencoded({extended:true}));
 app.use(bodyParser.json());
 
+const httpsOptions={
+	key : fs.readFileSync('./key.pem'),
+	cert : fs.readFileSync('./certificate.crt'),
+	}
+
 //connect to mongoose {returns promise}
 const db = process.env.MONGO_URI;
 //mongoose.set('debug',true)
@@ -56,6 +62,9 @@ app.use((req,res,next)=>{
 app.use(product_routes);
 app.use(order_routes);
 app.use(account_routes);
+app.get('/hello',(req,res)=>{
+	res.send('Hello World');
+	})
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT ,'0.0.0.0' ,()=>console.log(`Server Listening on ${PORT}`)); 
+const PORT = process.env.PORT || 8443;
+https.createServer(httpsOptions , app).listen(PORT ,'0.0.0.0' ,()=>console.log(`Server Listening on ${PORT}`)); 

@@ -28,3 +28,10 @@ export const write_states = (id:string , data:any)=>{
   let _id = id.replace(Prefix , '')
   fs.writeFileSync(`./customer/${_id}_states.json` , JSON.stringify(data));
 }
+
+
+  export let priceFormat = Intl.NumberFormat('en-us',{
+    currency:"HKD",
+    style:'currency'
+  })
+  

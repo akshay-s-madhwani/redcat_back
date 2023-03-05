@@ -30,9 +30,15 @@ const sellerSchema = Schema({
     profile_picture:{
         type:String,
     },
+    verified:{type:Boolean},
+    emailVerified:{type:Boolean},
     category:[
     {type:String}
     ],
+    collection_points:[{
+        name:{type:String},
+        address:{type:String}
+}],
     currency:{
         type:String
     },

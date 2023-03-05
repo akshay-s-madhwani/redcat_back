@@ -1,5 +1,6 @@
 const stripe = require('stripe');
 const express = require('express');
+const https = require('https');
 const app = express();
 const fs = require('fs');
 const redis = new (require('ioredis'))()
@@ -7,17 +8,28 @@ const orderSchema  = require('./models/order_models');
 const user_model = require('./models/user_model');
 const seller_model = require('./models/seller_model');
 const product_model = require('./models/product_model');
+require('dotenv').config();
 
 // This is your Stripe CLI webhook secret for testing your endpoint locally.
-const endpointSecret = "whsec_1e042a3da636ecd0703eee1204159705467efd5d134586653a1fc53e9c5cdaa0";
-const logicRedefinedKey = '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'
+//const endpointSecret = "whsec_1e042a3da636ecd0703eee1204159705467efd5d134586653a1fc53e9c5cdaa0";
+const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+const logicRedefinedKey = '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'
+const httpsOptions = {
+	key:fs.readFileSync('./Seller_bot/web_panel/backend/key.pem'),
+	cert:fs.readFileSync('./Seller_bot/web_panel/backend/certificate.crt')
+	};
+
+  app.get('/webhook',(req,res)=>{
+    return res.send('Connection working');
+  })
+  
 app.post('/webhook', express.raw({type: 'application/json'}), (request, response) => {
   
   const sig = request.headers['stripe-signature'];
 
   let event;
-  redis.publish('order_status_channel' , 'Started')
+  
   try {
     event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
     if(!fs.existsSync('./webhook_events.json')){
@@ -27,6 +39,7 @@ app.post('/webhook', express.raw({type: 'application/json'}), (request, response
     old_events.push(event);
     fs.writeFileSync('./webhook_events.json', JSON.stringify(old_events) , 'utf8');
   } catch (err) {
+  console.log(err.message)
     response.status(400).send(`Webhook Error: ${err.message}`);
     return;
   }
@@ -36,40 +49,48 @@ app.post('/webhook', express.raw({type: 'application/json'}), (request, response
   switch (event.type) {
     case 'cash_balance.funds_available':
       let cashBalance = event.data.object;
-      // Then define and call a function to handle the event cash_balance.funds_available
       break;
     case 'checkout.session.async_payment_succeeded':
       let session = event.data.object;
-      // Then define and call a function to handle the event checkout.session.async_payment_succeeded
       break;
+
+
+//===================================================================================      
     case 'checkout.session.completed':
       let status = event.data.object;
-      let {metadata} = status;
+      let metadata_id = status.metadata.metadata_id;
+      redis.get(metadata_id)
+      .then(payload =>{
+      let metadata = JSON.parse(payload);
       if(metadata){
-        let {info , id , name , address , number , customer} = metadata;
+        let {info , id , name , address , number , customer , hasMultipleProducts} = metadata;
         
-        let sale_information = JSON.parse(info)
         
-        console.log(sale_information)
         let new_order = new orderSchema({
           gross_price:status.amount_total/100,
           vat:0,
           discount:0,
           extra_charges:0,
           products:[],
-          multi_seller:[]
+          multi_seller:[],
+          payment_status:'payment_made'
         });
         
         let user_id;
         user_model.findOne({number})
         .then(data=>{
-          console.log(data)
           console.log(data._id)
           user_id=data._id
           new_order['ordered_by'] = data._id
+          if(!number){
+            number = data.number
+          }
         });
 
         
+let sale_information = JSON.parse(info)        
+        console.log(sale_information)
+
         let all_sellers = sale_information.map(i=>i.soldBy)
         let sellers = Array.from(new Set(all_sellers));
         console.log(sellers)
@@ -83,51 +104,75 @@ app.post('/webhook', express.raw({type: 'application/json'}), (request, response
               product:i.product,
               quantity:i.quantity,
               properties:{...i.properties},
-              amount:Number(i.product)*(Number(i.quantity)||1)
+              amount:Number(i.price)*(Number(i.quantity)||1)
             })
           })
         })
         }else{
+          
         for(let i of sellers){
           for(let j of sale_information){
             if(i === j.soldBy){
               seller_model.findOne({_id:i})
               .then(seller_info=>{
+                console.log("price ", j.price, j.Price)
                 new_order.multi_seller.push({
-                  seller:i,
+                  soldBy:j.soldBy,
                   product:j.product,
                   quantity:j.quantity,
-                  properties:j.properties
+                  properties:{...j.properties},
+                  amount:Number(j.price)*(Number(j.quantity)||1)
                 })
                 new_order.products.push({
                   product:j.product,
                   quantity:j.quantity,
-                  properties:j.properties
+                  properties:{...j.properties},
+                  amount:Number(j.price)*(Number(j.quantity)||1)
                 })
             })
           }
           }
         }
       }
-      if(!number){
-        user_model.findOne({_id})
-        .then(data=>{
-          number = data.number
-        })
-      }
+      
       new_order.save()
       .then(saved_data=>{
         console.log('success')
         redis.publish('payment_status_channel' , JSON.stringify({...metadata, order_details:{...new_order},success:true,number}))
+;
+        let time = new Date().toLocaleString().replaceAll(' ','').replace(/[:(, )\/]/g,'_').replace(/[AM PM]/g,'').split('_');
+        let time_ = time;
+        time[1] = Number(time[1]) + Number(process.env.CONFIRMATION_DELAY);
+        time_[1] = Number(time_[1]) + ( 1 - Number(process.env.CONFIRMATION_DELAY));
+        time = time.join(',');
+        time_ = time_.slice(0,4).join(',');
+        let notifications = fs.readFileSync('./notifications/notify_messages.json','utf8');
+        if(!notifications.length) { notifications = '{}'};
+
+         try{
+         	let notify = JSON.parse(notifications);
+         	notify[time_]={target:"seller",invoice:saved_data.invoice_number};
+         	notify[time]={target:"customer",invoice:saved_data.invoice_number};
+         	
+         	fs.writeFileSync('./notifications/notify_messages.json' , JSON.stringify(notify));
+         	// return response.status(200).json({success:true, message:info})
+         	}
+         	catch(e){
+         	
+         		console.log('Error in setting up notifications',e);
+         		// return response.status(400).json({success:false,message:e})
+         		}
       })
       .catch(e=>{
         console.log(e)
         redis.publish('payment_status_channel' , JSON.stringify({...metadata, order_details:{...new_order},success:false,number}))
+        // return response.status(400).json({success:false,message:e})
       })
       
 }else{
   console.log(session)
 }
+      })
       // Then define and call a function to handle the event checkout.session.completed
       break;
     case 'payment_intent.amount_capturable_updated':
@@ -164,6 +209,7 @@ app.post('/webhook', express.raw({type: 'application/json'}), (request, response
       break;
     case 'payment_link.created':
       let paymentLink = event.data.object;
+      console.log(paymentLink)
       // Then define and call a function to handle the event payment_link.created
       break;
     case 'payment_link.updated':
@@ -194,4 +240,6 @@ app.post('/webhook', express.raw({type: 'application/json'}), (request, response
   response.send();
 });
 
-app.listen(4242, '0.0.0.0', () => console.log('Running on port 4242'));
+
+// https.createServer( httpsOptions , app)
+				app.listen(process.env.WEBHOOK_PORT||2053, '0.0.0.0', () => console.log(`Running on port ${process.env.WEBHOOK_PORT||2053}`));

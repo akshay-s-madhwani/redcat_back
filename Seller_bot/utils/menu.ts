@@ -4,8 +4,11 @@ export const show_menu = async(socket:any , number:string)=>{
   let state = await read_states(number);
   state.active_state = 'general';
  await write_states(number , state)
-    if(!state || !Object.keys(state).includes('authorised') || !state.authorized){
-          const buttonMessage = await {
+    if(!state || !Object.keys(state).includes('authorized') || !state.authorized){
+      console.log(!Object.keys(state).includes('authorized'))
+      console.log(!state)
+      console.log(!state.authorized)
+          const buttonMessage = {
               text:'*Menu*',
               buttons:[
                   {buttonId:`signin`, buttonText: {displayText: `Sign In`}, type: 1 },

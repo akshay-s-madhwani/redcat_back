@@ -1,0 +1,17 @@
+#underline{
+    width:0;
+    height: 1.5px;
+    background-color:#fff;
+    margin-left:0;
+
+}
+
+#links:hover #underline{
+    width:105%;
+    transition:all .2s ease-in;
+    
+}
+
+.menu_button:hover{
+    background: rgba(51, 51, 51, 0.475);
+}

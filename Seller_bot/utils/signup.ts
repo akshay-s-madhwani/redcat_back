@@ -1,11 +1,13 @@
-const { read_states , write_states } = require('./utils/utility_methods');
+const { read_states , write_states , Prefix } = require('./utility_methods');
+const sellerSchema = require('../../models/seller_model');
 
 export const signup = async (socket:any , sender:string)=>{
     const states = await read_states(sender);
     if(states.authorized){return await socket.sendMessage(sender , {text:'Already logged In'})}
-    states.active_state = "signup";
-    await write_states(sender , states);
-    await socket.sendMessage(sender , {text:'Registering Process started\nPlease Enter your Shop Name' , footer:'to Close the process , Send 1'})
+    //states.active_state = "signup";
+    //await write_states(sender , states);
+    //await socket.sendMessage(sender , {text:'Registering Process started\nPlease Enter your Shop Name' , footer:'to Close the process , Send 1'})
+    await socket.sendMessage(sender , {text:"Please visit http://159.65.248.141:90/signup"})
 }
 
 export const save_details = async (socket:any , formatted_number:string , message:string)=>{

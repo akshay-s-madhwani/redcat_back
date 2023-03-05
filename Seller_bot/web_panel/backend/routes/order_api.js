@@ -9,7 +9,7 @@ export const get_orders = async(offset='')=>{
 
 export const update_order = async(invoice , delivery , payment , status)=>{
 	let {seller_id} = JSON.parse(localStorage.getItem('store_'));
-	let response = await fetch(`${Config.DOMAIN}/orders/${invoice}/${delivery}/${payment}/${status}` , {
+	let response = await fetch(`${Config.DOMAIN}/order/${invoice}/${delivery}/${payment}/${status}` , {
 		method:'PUT',
 		"content-type":"application/json"
 	});

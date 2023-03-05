@@ -1,0 +1,32 @@
+.sidebar{
+    background: rgba(0,103,86,255);
+    box-shadow: 0 8px 32px 0 rgba(0,103,86,255);
+    backdrop-filter: blur( 16.5px );
+    width: 11rem;
+    height: calc(100vh);
+    padding: 0px 20px;
+    justify-content: space-evenly;
+    display: flex;
+    flex-flow: column;
+    align-items: stretch;
+    transition: .2s ease-in;
+    transform:translateX(0);
+}
+.collapsed_sidebar{
+    width:6rem
+}
+.slide_back{
+    transform:translateX(12rem) !important;
+    z-index: 3;
+}
+.slide_front{
+    transform:translateX(-1px) !important;
+    z-index: 3;
+}
+@media only screen and (max-width:992px){
+    .sidebar{
+        position: fixed;
+        left:-12rem
+    }
+    
+}

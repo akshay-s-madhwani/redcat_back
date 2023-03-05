@@ -1,4 +1,4 @@
-const { mkdirSync , existsSync , writeFileSync}  = require('fs');
+const { mkdirSync , existsSync , writeFileSync, readFileSync}  = require('fs');
 let uuid = require('uuid')
 let productSchema = require('../../../../models/product_model.js');
 const seller_model = require('../../../../models/seller_model.js');
@@ -78,6 +78,17 @@ module.exports = async (req, res) => {
      writeFileSync(`../../${source_path}/${number}/${imageFileName}.${imageBuffer.type.split('/')[1].replace('jpeg','jpg')}`,imageBuffer.data)
      
     }
+    else{
+        let image_data_from_file = readFileSync(`../../${image}`,'base64');
+        if(image.endsWith('.jpg') || image.endsWith('.jpeg') || image.endsWith('.pjpeg') || image.endsWith('.jfif')){
+            image_data_from_file = `data:image/jpeg;base64,${image_data_from_file}`;
+        }
+        if(image.endsWith('.png')){
+            image_data_from_file = `data:image/png;base64,${image_data_from_file}`;
+        }
+        new_product.imageData = image_data_from_file;
+        
+    }
     	console.log(new_product);
     await new_product.save()
         .then(product => {
@@ -90,7 +101,7 @@ module.exports = async (req, res) => {
         })
         .catch(e => {
             console.log(e)
-            res.status(400).json({ message: "Error occured while saving product" });
+            res.status(400).json({success:false, message: "Error occured while saving product" });
         })
 
 }
